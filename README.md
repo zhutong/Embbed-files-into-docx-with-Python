@@ -4,7 +4,7 @@
 
 
 ## 一、准备
-office，python，olefile，oletools
+MS Office，python，python-docx，olefile，oletools
 
 ## 二、认识docx文档
 docx格式的word文档其实就是使用zip压缩的以xml文档为主的文件目录。
@@ -171,8 +171,9 @@ docx格式的word文档其实就是使用zip压缩的以xml文档为主的文件
     ```
 
 4. 新的“demo1.docx”会生成，使用word打开，你会发现图标换了，双击图标，内嵌的word文件能够正常打开。
+5. 用其它的docx文件替换file2001.docx，重新压缩。然后再使用word打开“demo1.docx”，双击图标，内嵌的文档也是替换后的了。
 
-5. 小结：
+6. 小结：
    - docx文档就是使用zip压缩的带目录结构的一堆文件集合。
    - 嵌入的附件放在embeddings目录下，文件名可以自己指定（注意不要使用中文字符）。
    - 图标放在media目录下，可以自己指定图标。
@@ -198,14 +199,43 @@ docx格式的word文档其实就是使用zip压缩的以xml文档为主的文件
    - <code>document.xml</code>文件的“w:object”中有些参数值并不会影响嵌入的文档，只要其和其它不冲突就可以。
 
 ## 四、小试身手：插入Office文档
-参考上面步骤，自己尝试嵌入一个Excel或其它office文件。你可以修改图标、文件名，甚至是引用的Id。
+### 练习
+1. 参考上面步骤，自己尝试嵌入一个Excel或其它office文件。你可以修改图标、文件名，引用的Id。
+1. 用同类型的文件替换embeddings下的文件。
 
-## 五、插入其它格式文件
-参考上面步骤，添加一个zip文件。
+
+## 五、插入二进制格式的文件
+1. 参考上面步骤，向docx文件添加一个zip或其它二进制格式的文件。保存docx，然后解压。你会发现zip文件被保存成了“oleObject1.bin”。
+1. 查看<code>[Content_Types].xml</code>、<code>document.xml.rels</code>和<code>document.xml</code>文件，你会发现bin文件的文件类型定义。
+1. 像之前练习的一样，修改图标、文件名，引用的Id都没问题。
+2. 使用另外的zip文件替换“oleObject1.bin”，压缩成docx后再用word打开，好像也没问题。但是双击图标，这时候才发现根本无法解压。
+
+这究竟是什么原因呢？
+不知道你注意到没有，bin文件对应的类型是“oleObject”。这是微软的OLE对象。也就是说，之前的zip文件被重新打包成了OLE对象。简单的文件替换是行不通的。
 
 ### 初识Ole
+本人信奉的是实用至上。对于OLE的前身今生、技术细节统统不关心。这里我只需要知道的是，嵌入的二进制文件被打包进了oleObject1.bin。这是一个OLE对象。而OLE在内部模拟了Fat文件系统，每个扇区512字节。二进制文档放到了“ole10native”路径下。但具体的格式是怎样的呢？从网上搜了很久，最终找到了olefile和oletools（同一作者）python工具，可以用来分析查看OLE对象。
+
+通过查看oleobj.py（oletools中的）代码，终于了解到了ole10native的数据结构。试了试，可以把二进制文件的名字和内容从oleObject1.bin里正确提取出来。
+
+但是问题来了，我们的目的是要嵌入二进制文件，也就是说要生成oleObject1.bin这样的文件。而“ole10native”只是这个文件的一部分。继续研究OLE太费事。怎么办呢？
 
 ### 解决方案
+一个偷懒的解决方案就是，向docx嵌入一个足够大的二进制文件，让word帮我们生成好这个“oleObject1.bin”当做“容器模板”。需要嵌入其它二进制文件时，在对应的位置替换文件名和内容即可（感谢olefile和oleobj）。
+
+问题又来了，为了保证将来能容纳大的二进制文件（假设上限100MB），这个容器模板就很大，只是不会小于100MB。但如果实际需要嵌入的文件很小，最终生成的word文件是否一定要100MB以上呢？
+
+通过试验，我们发现，可以将“ole10native”中存储空间剩余部分置空（用"\x00"填充），甚至可以裁剪掉剩余部分。这样zip压缩后就会很小。
+
+## 使用python嵌入文档
+基本过程如下：
+1. 如果要嵌入附件的docx文件格式固定，只需要使用word打开该文件，在需要嵌入文档的位置插入“占位符”特征文本。比如输入“{{embed-here}}”。如果是非固定格式，比如使用python-docx库动态生成docx文档，也需要在需要嵌入文档的位置插入“占位符”特征文本。
+2. 解压docx文件，在“word”子文件夹下创建“embeddings”和“media”文件夹（如果不存在的话）。
+3. 将要嵌入的文档拷贝到“embeddings”下，目标文件名不要使用中文字符。
+4. 将图标文件拷贝到“media”下
+5. 在<code>[Content_Types].xml</code>文件中添加扩展文档类型定义。更简单粗暴的方法是：使用一个包含所有用到的文件类型定义的文件来替换该文件。
+6. 在<code>document.xml.rels</code>文件中为嵌入的文档创建引用定义。
+7. 修改<code>document.xml</code>文件，将占位符替换为“<w:object>...</w:object>”内容。
 
 
 ## 遗留的问题
